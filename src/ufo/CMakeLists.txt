@@ -184,6 +184,12 @@ if(crtm_FOUND)
     target_link_libraries(ufo PUBLIC crtm)
 endif()
 
+# ppro library
+if(ppro_FOUND)
+    target_link_libraries(ufo PUBLIC ppro)
+    message(STATUS "UFO linked with ppro library")
+endif()
+
 if(geos-aero_FOUND)
     target_link_libraries(ufo PUBLIC geos-aero)
 endif()

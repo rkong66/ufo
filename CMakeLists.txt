@@ -89,6 +89,24 @@ else( ${crtm_FOUND} )
     message(STATUS "CRTM NOT FOUND; Excluding CRTM Observation Operator")
 endif( ${crtm_FOUND} )
 
+# ppro-lib (dual-polarization radar operator)
+# Note: ppro-lib is managed by the top-level ecbuild_bundle as PROJECT ppro
+# This section just sets ppro_FOUND for conditional linking
+if(TARGET ppro)
+    set(ppro_FOUND TRUE)
+    message(STATUS "PPRO: Found ppro target (from top-level ecbuild_bundle)")
+else()
+    # Fall back to find_package (if ppro is installed separately)
+    find_package(PPRO QUIET)
+    if(PPRO_FOUND)
+        set(ppro_FOUND TRUE)
+        message(STATUS "PPRO: Found via find_package (${PPRO_VERSION})")
+    else()
+        set(ppro_FOUND FALSE)
+        message(STATUS "PPRO: Not found. To use PPRO, add to top-level CMakeLists.txt or install separately")
+    endif()
+endif()
+
 # RTTOV
 find_package( rttov 12.1.0 QUIET )
 if( ${rttov_FOUND} )
