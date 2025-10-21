@@ -5,8 +5,8 @@
  * which can be obtained at http://www.apache.org/licenses/LICENSE-2.0. 
  */
 
-#ifndef UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPRO_H_
-#define UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPRO_H_
+#ifndef UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPRO_H_
+#define UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPRO_H_
 
 #include <ostream>
 #include <string>
@@ -20,8 +20,8 @@
 
 #include "ufo/ObsOperatorBase.h"
 #include "ufo/ObsOperatorParametersBase.h"
-#include "ufo/operators/radarreflectivity/ppro/ObsPPRO.interface.h"
-#include "ufo/operators/radarreflectivity/MicrophysicsOptions.h"
+#include "ufo/operators/radarpolarimetric/ppro/ObsPPRO.interface.h"
+#include "ufo/operators/radarshared/MicrophysicsOptions.h"
 #include "ufo/utils/parameters/ParameterTraitsVariable.h"
 
 /// Forward declarations
@@ -192,4 +192,4 @@ class ObsPPRO : public ObsOperatorBase,
 // -----------------------------------------------------------------------------
 
 }  // namespace ufo
-#endif  // UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPRO_H_
+#endif  // UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPRO_H_

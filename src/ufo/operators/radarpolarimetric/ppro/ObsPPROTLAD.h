@@ -5,8 +5,8 @@
  * which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
  */
 
-#ifndef UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPROTLAD_H_
-#define UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPROTLAD_H_
+#ifndef UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPROTLAD_H_
+#define UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPROTLAD_H_
 
 
 #include <ostream>
@@ -15,8 +15,8 @@
 #include "oops/base/Variables.h"
 #include "oops/util/ObjectCounter.h"
 #include "ufo/LinearObsOperatorBase.h"
-#include "ufo/operators/radarreflectivity/ppro/ObsPPRO.h"
-#include "ufo/operators/radarreflectivity/ppro/ObsPPROTLAD.interface.h"
+#include "ufo/operators/radarpolarimetric/ppro/ObsPPRO.h"
+#include "ufo/operators/radarpolarimetric/ppro/ObsPPROTLAD.interface.h"
 
 // Forward declarations
 namespace ioda {
@@ -60,4 +60,4 @@ class ObsPPROTLAD : public LinearObsOperatorBase,
 // -----------------------------------------------------------------------------
 
 }  // namespace ufo
-#endif  // UFO_OPERATORS_RADARREFLECTIVITY_PPRO_OBSPPROTLAD_H_
+#endif  // UFO_OPERATORS_RADARPOLARIMETRIC_PPRO_OBSPPROTLAD_H_

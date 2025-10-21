@@ -37,7 +37,9 @@ if(oasim_FOUND)
     add_subdirectory( operators/oasim)
 endif()
 add_subdirectory( operators/product )
+add_subdirectory( operators/radarshared )
 add_subdirectory( operators/radardopplerwind )
+add_subdirectory( operators/radarpolarimetric )
 add_subdirectory( operators/radarradialvelocity )
 add_subdirectory( operators/radarreflectivity)
 if( rttov_FOUND )
@@ -126,7 +128,11 @@ list( APPEND ufo_src_files
     ${insitupm_src_files}
     ${aerosols_src_files}
     ${sfcpcorrected_src_files}
+    ${radarshared_src_files}
     ${radardopplerwind_src_files}
+    ${radarpolarimetric_src_files}
+    ${radardopplerwind_src_files}
+    ${radarpolarimetric_src_files}
     ${radarradialvelocity_src_files}
     ${radarreflectivity_src_files}
     ${profile_src_files}

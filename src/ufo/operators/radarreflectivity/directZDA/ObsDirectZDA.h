@@ -21,7 +21,7 @@
 #include "ufo/ObsOperatorBase.h"
 #include "ufo/ObsOperatorParametersBase.h"
 #include "ufo/operators/radarreflectivity/directZDA/ObsDirectZDA.interface.h"
-#include "ufo/operators/radarreflectivity/MicrophysicsOptions.h"   //K.R. added
+#include "ufo/operators/radarshared/MicrophysicsOptions.h"   //K.R. added - moved to shared radar directory
 #include "ufo/utils/parameters/ParameterTraitsVariable.h"
 
 /// Forward declarations
