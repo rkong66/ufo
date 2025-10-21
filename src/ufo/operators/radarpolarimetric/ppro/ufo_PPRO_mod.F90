@@ -10,8 +10,18 @@ module ufo_PPRO_mod
 !>
 !> This module provides the UFO interface layer for the PPRO operator.
 !> Core physics are in the external ppro-lib library.
-!>
-!> @author Multiple contributors (see ppro-lib/README.md)
+!> 
+!> Authors:
+!>   Zhiquan (Jake) Liu (NCAR/MMM) - Implementation of the Zhang21 operator
+!>   Tzu-Chin Tsai (CWA,Taiwan) - Implementation of the TCWA2 operator
+!>   Hejun Xie  - Integration into the JEDI-UFO framework;
+!>                development of TL/AD components
+!>   Tao Sun - Extension to include hail categories and advanced microphysics support
+!>   Rong Kong (NCAR/MMM) - Bug fixes, operator tuning and testing,
+!>                          development of a multi-operator architecture, and
+!>                          modularization with an external ppro library
+
+
 
  use oops_variables_mod
  use obs_variables_mod

@@ -5,7 +5,7 @@
  * which can be obtained at http://www.apache.org/licenses/LICENSE-2.0. 
  */
 
-#include "ufo/operators/radarreflectivity/ppro/ObsPPRO.h"
+#include "ufo/operators/radarpolarimetric/ppro/ObsPPRO.h"
 
 #include <ostream>
 
