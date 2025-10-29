@@ -26,7 +26,6 @@ module ufo_PPRO_tlad_mod
                                              ! -1 means not used
     character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
     character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
-    logical :: use_variational  = .false.
     integer :: nval, nlocs
     real(kind_real), allocatable :: wf(:)
     integer, allocatable :: wi(:)
@@ -132,16 +131,6 @@ subroutine PPRO_tlad_setup_(self, yaml_conf)
   else
     print*, 'TLAD micro_option set to: ', trim(micro_option)
     call abor1_ftn("microphysics option not set or unsupported, aborting")
-  endif
-
-  ! If YAML option indicates use of variational method then update mp_option
-  self%use_variational=.false.
-  call yaml_conf%get_or_die("use variational method", self%use_variational)
-
-  if (self%use_variational) then
-    if (trim(micro_option) .ne. "Thompson") then ! Jun: Or we can use if ( NSSL) 
-      call abor1_ftn("variational method not available for requested microphysics option")
-    endif
   endif
 
   if ( .not. allocated(geovars_list) ) allocate(geovars_list(n_geovars))

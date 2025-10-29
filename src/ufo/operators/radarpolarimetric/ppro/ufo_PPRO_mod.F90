@@ -48,7 +48,6 @@ module ufo_PPRO_mod
                                        ! -1 means not used
    character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
    character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
-   logical, public :: use_variational = .false.
  contains
    procedure :: setup  => ufo_PPRO_setup
    procedure :: simobs => ufo_PPRO_simobs
@@ -126,19 +125,13 @@ logical :: found
   else if (trim(micro_option) .eq. "NSSL") then
     self%micro_option = 'NSSL'
     n_geovars=14
+  else if (trim(micro_option) .eq. "TCWA2") then
+    self%micro_option = 'TCWA2'
+    n_geovars=15
   else
     print*, ' microphysics picked is: ', trim(micro_option)
     call abor1_ftn("microphysics option not set or unsupported, aborting")
   endif
-
-  ! If YAML option indicates use of variational method then update mp_option
-  self%use_variational=.false.
-  call yaml_conf%get_or_die("use variational method", self%use_variational)
-  !if (self%use_variational) then
-  !  if (trim(micro_option) .ne. "Thompson" .or. trim(micro_option) .ne. "WSM6") then ! Jun: Or we can use if ( NSSL) 
-  !    call abor1_ftn("variational method not available for requested microphysics option")
-  !  endif
-  !endif
 
   if ( .not. allocated(geovars_list) ) allocate(geovars_list(n_geovars))
   geovars_list(1) = var_airdens
@@ -221,6 +214,57 @@ logical :: found
 
   endif
 
+  !! TCWA2 scheme
+  if ( trim(self%micro_option) .eq. "TCWA2" ) then
+     ! number concentration of rain water, #/kg
+     var_string="var_rain_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(8) = this_varname
+     endif
+     ! number concentration of snow, #/kg
+     var_string="var_snow_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(9) = this_varname
+     endif
+     ! number concentration of graupel, #/kg
+     var_string="var_graupel_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(10) = this_varname
+     endif
+     ! mixing ratio of cloud, kg/kg
+     var_string="var_cloud_mixing_ratio"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(11) = this_varname
+     endif
+     ! mixing ratio of ice, kg/kg
+     var_string="var_ice_mixing_ratio"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(12) = this_varname
+     endif
+     ! number concentration of ice, #/kg
+     var_string="var_ice_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(13) = this_varname
+     endif
+     ! melted fraction of snow
+     var_string="var_snow_melted_fraction"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(14) = this_varname
+     endif
+     ! melted fraction of graupel
+     var_string="var_graupel_melted_fraction"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(15) = this_varname
+     endif
+  endif
 
   ! YAML option for vertical coordinate name
   call yaml_conf%get_or_die("VertCoord",coord_name)
@@ -272,8 +316,11 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
   real (kind=8) :: rhow,rho ! kg/m^3
   real (kind=8) :: t ! temperature, Kelvin
   real (kind=8) :: qr, qs, qg, qh ! mixing ratio, g/kg
+  real (kind=8) :: qc, qi             ! cloud water and ice mixing ratio, g/kg (TCWA2)
   real (kind=8) :: nr, ns, ng, nh ! number concentration
+  real (kind=8) :: ni                 ! ice number concentration (TCWA2)
   real (kind=8) :: vg, vh         ! volume mixing ratio
+  real (kind=8) :: smlf, gmlf         ! melted fractions (TCWA2)
   real (kind=8) :: zh, zdr, kdp, phv
   real (kind=8) :: zh_dBZ, zdr_dB
   real(c_double) :: missing
@@ -372,6 +419,15 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
        nh = fields(12,iobs)*rho ! #/kg   x  kg/m^3  =  #/m^3
        vg = fields(13,iobs)*rho ! m^3/kg x  kg/m^3  =  m^3/m^3
        vh = fields(14,iobs)*rho ! m^3/kg x  kg/m^3  =  m^3/m^3
+    else if ( trim(self%micro_option) .eq. "TCWA2" ) then
+       nr = fields(8,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
+       ns = fields(9,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
+       ng = fields(10,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+       qc = 1000.0*fields(11,iobs) ! kg/kg -> g/kg
+       qi = 1000.0*fields(12,iobs) ! kg/kg -> g/kg
+       ni = fields(13,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+       smlf = fields(14,iobs)      ! melted fraction of snow
+       gmlf = fields(15,iobs)      ! melted fraction of graupel
     endif
 
     if (rho .LT. 0.0) then
@@ -393,6 +449,11 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
        call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &
                                qr, qs, qg, zh, zdr, kdp, phv, &
                                qh=qh, nr=nr, ns=ns, ng=ng, nh=nh, vg=vg, vh=vh)
+
+    else if ( trim(self%micro_option) .eq. "TCWA2" ) then
+       call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &
+                               qr, qs, qg, zh, zdr, kdp, phv, &
+                               nr=nr, ns=ns, ng=ng, qi=qi, ni=ni, qc=qc, smlf=smlf, gmlf=gmlf)
     end if
 
     if (zh < 1.0_kind_real)then
