@@ -82,12 +82,6 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
      "polarimetric operator by name (Zhang21 or TCWA2)",
      PolarimetricOperatorOption::ZHANG21,
      this};
-
-  oops::Parameter<bool> use_variational
-    {"use variational method",
-     "use variational TL/AD method (P-PRO)",
-     false,
-     this};
   
   /*
    * The following list of hydrometeor species mixing ratios and number concentrations
