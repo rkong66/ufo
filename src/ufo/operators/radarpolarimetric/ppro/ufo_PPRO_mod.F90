@@ -23,6 +23,7 @@ module ufo_PPRO_mod
 
 
 
+ use kinds
  use oops_variables_mod
  use obs_variables_mod
  use ufo_vars_mod
@@ -42,15 +43,19 @@ module ufo_PPRO_mod
 !> Fortran derived type for the observation type
  type, public :: ufo_PPRO
  private
-   type(obs_variables), public :: obsvars
-   type(oops_variables), public :: geovars
-   integer, public :: obsvarindices(nopvar) ! Array that maps indices of opvars to indices of hofx columns
+  type(obs_variables), public :: obsvars
+  type(oops_variables), public :: geovars
+  integer, public :: obsvarindices(nopvar) ! Array that maps indices of opvars to indices of hofx columns
                                        ! -1 means not used
-   character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
-   character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
+  character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
+  character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
+  real(kind_real), public :: coeff_melt
+  logical, public :: debug_output          ! Debug output switch (fixed file: ppro_debug.txt)
+  logical, public :: use_size_zdr_qc       ! Particle size-based ZDR QC switch
+  logical, public :: use_temperature_qc    ! Temperature-based melting layer QC switch
  contains
-   procedure :: setup  => ufo_PPRO_setup
-   procedure :: simobs => ufo_PPRO_simobs
+  procedure :: setup  => ufo_PPRO_setup
+  procedure :: simobs => ufo_PPRO_simobs
  end type ufo_PPRO
 
  private
@@ -131,6 +136,43 @@ logical :: found
   else
     print*, ' microphysics picked is: ', trim(micro_option)
     call abor1_ftn("microphysics option not set or unsupported, aborting")
+  endif
+
+  call yaml_conf%get_or_die("tuning coefficient for melting", self%coeff_melt)
+
+  ! Read debug output switch (optional, default off, writes to ppro_debug.txt)
+  if (yaml_conf%has("debug output")) then
+    call yaml_conf%get_or_die("debug output", self%debug_output)
+  else
+    self%debug_output = .false.
+  endif
+
+  ! Read QC switches (optional, default off)
+  if (yaml_conf%has("use size zdr qc")) then
+    call yaml_conf%get_or_die("use size zdr qc", self%use_size_zdr_qc)
+  else
+    self%use_size_zdr_qc = .false.
+  endif
+
+  if (yaml_conf%has("use temperature qc")) then
+    call yaml_conf%get_or_die("use temperature qc", self%use_temperature_qc)
+  else
+    self%use_temperature_qc = .false.
+  endif
+
+  if (self%debug_output) then
+    write(buffer,*) 'PPRO debug output enabled, file: ppro_debug.txt'
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  
+  if (self%use_size_zdr_qc) then
+    write(buffer,*) 'PPRO: Particle size-based ZDR QC enabled'
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  
+  if (self%use_temperature_qc) then
+    write(buffer,*) 'PPRO: Temperature-based melting layer QC enabled'
+    call fckit_log%info(buffer); buffer = ''
   endif
 
   if ( .not. allocated(geovars_list) ) allocate(geovars_list(n_geovars))
@@ -448,7 +490,13 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
     else if ( trim(self%micro_option) .eq. "NSSL" ) then
        call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &
                                qr, qs, qg, zh, zdr, kdp, phv, &
-                               qh=qh, nr=nr, ns=ns, ng=ng, nh=nh, vg=vg, vh=vh)
+                               qh=qh, nr=nr, ns=ns, ng=ng, nh=nh, vg=vg, vh=vh, &
+                               height=obsvcoord(iobs), zhobs = zhobs(iobs), zdrobs=zdrobs(iobs), &
+                               kdpobs=kdpobs(iobs), coeff_melt=self%coeff_melt, &
+                               temperature = t - 273.15, iobs=iobs, &
+                               debug_output=self%debug_output, &
+                               use_size_zdr_qc=self%use_size_zdr_qc, &
+                               use_temperature_qc=self%use_temperature_qc)
 
     else if ( trim(self%micro_option) .eq. "TCWA2" ) then
        call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &

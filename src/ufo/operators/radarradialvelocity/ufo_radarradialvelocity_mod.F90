@@ -71,7 +71,7 @@ subroutine ufo_radarradialvelocity_simobs(self, geovals, obss, nvars, nlocs, hof
   ! Local variables
   integer :: iobs, ivar, nvars_geovars
   real(kind_real),  dimension(:), allocatable :: obsvcoord
-  real(kind_real),  dimension(:), allocatable :: cosazm_costilt, sinazm_costilt, sintilt, vterminal
+  real(kind_real),  dimension(:), allocatable :: azimuth, tilt, vterminal
   type(ufo_geoval), pointer :: vcoordprofile, profile
   real(kind_real),  allocatable :: wf(:)
   integer,          allocatable :: wi(:)
@@ -90,15 +90,17 @@ subroutine ufo_radarradialvelocity_simobs(self, geovals, obss, nvars, nlocs, hof
 
 ! Get the observation vertical coordinates
   allocate(obsvcoord(nlocs))
-  allocate(cosazm_costilt(nlocs))
-  allocate(sinazm_costilt(nlocs))
-  allocate(sintilt(nlocs))
+  allocate(azimuth(nlocs))
+  allocate(tilt(nlocs))
   allocate(vterminal(nlocs))
 
   call obsspace_get_db(obss, "MetaData", "height", obsvcoord)
-  call obsspace_get_db(obss, "MetaData", "cosazm_costilt", cosazm_costilt)
-  call obsspace_get_db(obss, "MetaData", "sinazm_costilt", sinazm_costilt)
-  call obsspace_get_db(obss, "MetaData", "sintilt", sintilt)
+  call obsspace_get_db(obss, "MetaData", "radarAzimuth", azimuth)
+  call obsspace_get_db(obss, "MetaData", "radarTilt", tilt)
+
+! degree to radian (this is more common)
+  azimuth(:) = azimuth(:)/180. * (4.0d0 * atan(1.0d0))
+  tilt(:) = tilt(:)/180. * (4.0d0 * atan(1.0d0))
 
 ! put observation operator code here
 ! Allocate arrays for interpolation weights
@@ -136,17 +138,16 @@ subroutine ufo_radarradialvelocity_simobs(self, geovals, obss, nvars, nlocs, hof
   vterminal=0.0
   do ivar = 1, nvars
     do iobs=1,nlocs
-      hofx(ivar,iobs) = vfields(1,iobs)*cosazm_costilt(iobs) &
-                      + vfields(2,iobs)*sinazm_costilt(iobs) &
-                      + (vfields(3,iobs)-vterminal(iobs))*sintilt(iobs)
+      hofx(ivar,iobs) = vfields(1,iobs)*sin(azimuth(iobs))*cos(tilt(iobs)) &
+                      + vfields(2,iobs)*cos(azimuth(iobs))*cos(tilt(iobs)) &
+                      + (vfields(3,iobs)-vterminal(iobs))*sin(tilt(iobs))
     enddo
   end do
 
 ! Cleanup memory
   deallocate(obsvcoord)
-  deallocate(cosazm_costilt)
-  deallocate(sinazm_costilt)
-  deallocate(sintilt )
+  deallocate(azimuth)
+  deallocate(tilt)
   deallocate(vterminal)
   deallocate(wi)
   deallocate(wf)

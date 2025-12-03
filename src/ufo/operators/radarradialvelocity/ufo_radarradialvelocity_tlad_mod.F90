@@ -23,7 +23,7 @@ module ufo_radarradialvelocity_tlad_mod
     character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
     real(kind_real), allocatable :: wf(:)
     integer, allocatable :: wi(:)
-    real(kind_real),  dimension(:), allocatable :: cosazm_costilt, sinazm_costilt, sintilt, vterminal
+    real(kind_real),  dimension(:), allocatable :: azimuth, tilt, vterminal
   contains
     procedure :: setup => radarradialvelocity_tlad_setup_
     procedure :: cleanup => radarradialvelocity_tlad_cleanup_
@@ -63,6 +63,8 @@ subroutine radarradialvelocity_tlad_setup_(self, yaml_conf)
       self%v_coord = var_zm
   endif
 
+  ! Add vertical coordinate to geovars request list (fix for LETKF/TLAD)
+  call self%geovars%push_back(self%v_coord)
 
 end subroutine radarradialvelocity_tlad_setup_
 
@@ -97,15 +99,18 @@ subroutine radarradialvelocity_tlad_settraj_(self, geovals, obss)
   ! Get the observation vertical coordinates
   self%nlocs = obsspace_get_nlocs(obss)
   allocate(obsvcoord(self%nlocs))
-  allocate(self%cosazm_costilt(self%nlocs))
-  allocate(self%sinazm_costilt(self%nlocs))
-  allocate(self%sintilt(self%nlocs))
+  allocate(self%azimuth(self%nlocs))
+  allocate(self%tilt(self%nlocs))
   allocate(self%vterminal(self%nlocs))
 
   call obsspace_get_db(obss, "MetaData", "height", obsvcoord)
-  call obsspace_get_db(obss, "MetaData", "cosAzimuthCosTilt", self%cosazm_costilt)
-  call obsspace_get_db(obss, "MetaData", "sinAzimuthCosTilt", self%sinazm_costilt)
-  call obsspace_get_db(obss, "MetaData", "sinTilt", self%sintilt)
+  call obsspace_get_db(obss, "MetaData", "radarAzimuth", self%azimuth)
+  call obsspace_get_db(obss, "MetaData", "radarTilt", self%tilt)
+
+  ! degree to radian
+  self%azimuth(:) = self%azimuth(:)/180. * (4.0d0 * atan(1.0d0))
+  self%tilt(:) = self%tilt(:)/180. * (4.0d0 * atan(1.0d0))
+
 ! call obsspace_get_db(obss, "MetaData", "vterminal", self%vterminal)
 
   ! Allocate arrays for interpolation weights
@@ -163,8 +168,8 @@ subroutine radarradialvelocity_simobs_tl_(self, geovals, obss, nvars, nlocs, hof
 
   do ivar = 1, nvars
     do iobs=1,nlocs
-      hofx(ivar,iobs) = vfields(1,iobs)*self%cosazm_costilt(iobs) &
-                      + vfields(2,iobs)*self%sinazm_costilt(iobs)
+      hofx(ivar,iobs) = vfields(1,iobs)*sin(self%azimuth(iobs))*cos(self%tilt(iobs)) &
+                      + vfields(2,iobs)*cos(self%azimuth(iobs))*cos(self%tilt(iobs))
     enddo
   end do
 
@@ -200,8 +205,8 @@ subroutine radarradialvelocity_simobs_ad_(self, geovals, obss, nvars, nlocs, hof
      ! no vertical velocity and terminal velocity in GSI rw observer, it can add
      ! in future after acceptance test
      if (hofx(ivar,iobs) .ne. missing) then
-      vfields(1,iobs) = vfields(1,iobs) + hofx(ivar,iobs)*self%cosazm_costilt(iobs)
-      vfields(2,iobs) = vfields(2,iobs) + hofx(ivar,iobs)*self%sinazm_costilt(iobs)
+      vfields(1,iobs) = vfields(1,iobs) + hofx(ivar,iobs)*sin(self%azimuth(iobs))*cos(self%tilt(iobs))
+      vfields(2,iobs) = vfields(2,iobs) + hofx(ivar,iobs)*cos(self%azimuth(iobs))*cos(self%tilt(iobs))
      end if
     enddo
   end do
@@ -233,9 +238,8 @@ subroutine radarradialvelocity_tlad_cleanup_(self)
   self%nlocs = 0
   if (allocated(self%wi)) deallocate(self%wi)
   if (allocated(self%wf)) deallocate(self%wf)
-  if (allocated(self%cosazm_costilt)) deallocate(self%cosazm_costilt)
-  if (allocated(self%sinazm_costilt)) deallocate(self%sinazm_costilt)
-  if (allocated(self%sintilt)) deallocate(self%sintilt)
+  if (allocated(self%azimuth)) deallocate(self%azimuth)
+  if (allocated(self%tilt)) deallocate(self%tilt)
   if (allocated(self%vterminal)) deallocate(self%vterminal)
 end subroutine radarradialvelocity_tlad_cleanup_
 

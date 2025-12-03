@@ -82,7 +82,14 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
      "polarimetric operator by name (Zhang21 or TCWA2)",
      PolarimetricOperatorOption::ZHANG21,
      this};
-  
+ 
+  oops::Parameter<double> coeff_melt{
+    "tuning coefficient for melting",                // YAML name
+    "Coefficient scaling the geometric mean sqrt(qr*qx)/sqrt(nr*qx) in Liu et al. (2024) melting model", // description
+    0.3,                                             // default
+    this
+  };
+ 
   /*
    * The following list of hydrometeor species mixing ratios and number concentrations
    * need to be consistent with list of variables in ufo_variables_mod, which has some
