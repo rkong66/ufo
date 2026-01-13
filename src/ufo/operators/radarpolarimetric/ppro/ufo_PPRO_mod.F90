@@ -27,7 +27,15 @@ module ufo_PPRO_mod
  use oops_variables_mod
  use obs_variables_mod
  use ufo_vars_mod
- use dualpol_op_mod, only: ppro_init_coefs, ppro_compute_point, ppro_set_operator
+ use dualpol_op_mod, only: ppro_init_coefs, ppro_compute_point, ppro_set_operator, &
+                         melting_scheme_option, enable_melting_transition, &
+                         snow_ratio_low, snow_ratio_high, &
+                         graupel_ratio_low, graupel_ratio_high, &
+                         hail_ratio_low, hail_ratio_high, &
+                         enable_melting_water_limit, melting_water_fraction, &
+                         dmmax_rain, dmmax_pure_snow, dmmax_melting_snow, &
+                         dmmax_pure_graupel, dmmax_melting_graupel, &
+                         dmmax_pure_hail, dmmax_melting_hail
  use missing_values_mod
  use fckit_log_module, only: fckit_log
 
@@ -50,9 +58,7 @@ module ufo_PPRO_mod
   character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
   character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
   real(kind_real), public :: coeff_melt
-  logical, public :: debug_output          ! Debug output switch (fixed file: ppro_debug.txt)
-  logical, public :: use_size_zdr_qc       ! Particle size-based ZDR QC switch
-  logical, public :: use_temperature_qc    ! Temperature-based melting layer QC switch
+  character(len=16), public :: melting_scheme  ! Melting scheme option: 'liu24', 'liu25', or 'zhang24'
  contains
   procedure :: setup  => ufo_PPRO_setup
   procedure :: simobs => ufo_PPRO_simobs
@@ -80,6 +86,7 @@ character(kind=c_char,len=:), allocatable :: coord_name
 character(kind=c_char,len=:), allocatable :: micro_option
 character(kind=c_char,len=:), allocatable :: ppro_operator
 character(kind=c_char,len=:), allocatable :: this_varname
+character(kind=c_char,len=:), allocatable :: melting_scheme_str
 character(len=maxvarlen) :: var_string
 character(len=512) :: buffer
 integer :: i, j
@@ -140,40 +147,121 @@ logical :: found
 
   call yaml_conf%get_or_die("tuning coefficient for melting", self%coeff_melt)
 
-  ! Read debug output switch (optional, default off, writes to ppro_debug.txt)
-  if (yaml_conf%has("debug output")) then
-    call yaml_conf%get_or_die("debug output", self%debug_output)
+  ! Read melting scheme option (optional, default 'liu24')
+  ! 'liu24' = sqrt(qr*qx) for all species (default)
+  ! 'zhang24' = original zhang24 scheme (backward compatibility)
+  if (yaml_conf%has("melting scheme")) then
+    call yaml_conf%get_or_die("melting scheme", melting_scheme_str)
+    self%melting_scheme = trim(melting_scheme_str)
   else
-    self%debug_output = .false.
-  endif
-
-  ! Read QC switches (optional, default off)
-  if (yaml_conf%has("use size zdr qc")) then
-    call yaml_conf%get_or_die("use size zdr qc", self%use_size_zdr_qc)
-  else
-    self%use_size_zdr_qc = .false.
-  endif
-
-  if (yaml_conf%has("use temperature qc")) then
-    call yaml_conf%get_or_die("use temperature qc", self%use_temperature_qc)
-  else
-    self%use_temperature_qc = .false.
-  endif
-
-  if (self%debug_output) then
-    write(buffer,*) 'PPRO debug output enabled, file: ppro_debug.txt'
-    call fckit_log%info(buffer); buffer = ''
+    self%melting_scheme = 'liu24'  ! Default: liu24
   endif
   
-  if (self%use_size_zdr_qc) then
-    write(buffer,*) 'PPRO: Particle size-based ZDR QC enabled'
-    call fckit_log%info(buffer); buffer = ''
+  ! Set the module-level melting scheme option in ppro-lib
+  melting_scheme_option = trim(self%melting_scheme)
+  
+  write(buffer,*) 'PPRO melting scheme: ', trim(self%melting_scheme)
+  call fckit_log%info(buffer); buffer = ''
+
+  ! Read melting transition parameters (optional)
+  ! When enabled, uses smooth transition function instead of hard cutoff
+  if (yaml_conf%has("enable melting transition")) then
+    call yaml_conf%get_or_die("enable melting transition", enable_melting_transition)
+  else
+    enable_melting_transition = .false.  ! Default: off
   endif
   
-  if (self%use_temperature_qc) then
-    write(buffer,*) 'PPRO: Temperature-based melting layer QC enabled'
+  if (enable_melting_transition) then
+    write(buffer,*) 'PPRO: Melting transition enabled (smooth transition function)'
+    call fckit_log%info(buffer); buffer = ''
+    
+    ! Read transition parameters for each species (optional, with defaults)
+    if (yaml_conf%has("snow ratio low")) then
+      call yaml_conf%get_or_die("snow ratio low", snow_ratio_low)
+    endif
+    if (yaml_conf%has("snow ratio high")) then
+      call yaml_conf%get_or_die("snow ratio high", snow_ratio_high)
+    endif
+    if (yaml_conf%has("graupel ratio low")) then
+      call yaml_conf%get_or_die("graupel ratio low", graupel_ratio_low)
+    endif
+    if (yaml_conf%has("graupel ratio high")) then
+      call yaml_conf%get_or_die("graupel ratio high", graupel_ratio_high)
+    endif
+    if (yaml_conf%has("hail ratio low")) then
+      call yaml_conf%get_or_die("hail ratio low", hail_ratio_low)
+    endif
+    if (yaml_conf%has("hail ratio high")) then
+      call yaml_conf%get_or_die("hail ratio high", hail_ratio_high)
+    endif
+    
+    write(buffer,*) '  Snow transition: [', snow_ratio_low, ', ', snow_ratio_high, ']'
+    call fckit_log%info(buffer); buffer = ''
+    write(buffer,*) '  Graupel transition: [', graupel_ratio_low, ', ', graupel_ratio_high, ']'
+    call fckit_log%info(buffer); buffer = ''
+    write(buffer,*) '  Hail transition: [', hail_ratio_low, ', ', hail_ratio_high, ']'
     call fckit_log%info(buffer); buffer = ''
   endif
+
+  ! Read melting water content limit parameters (optional)
+  ! When enabled, limits qmsr/qmgr/qmhr to a fraction of qr
+  ! When disabled (default), no limit
+  if (yaml_conf%has("enable melting water limit")) then
+    call yaml_conf%get_or_die("enable melting water limit", enable_melting_water_limit)
+  else
+    enable_melting_water_limit = .false.  ! Default: off
+  endif
+  
+  if (enable_melting_water_limit) then
+    write(buffer,*) 'PPRO: Melting water content limit enabled'
+    call fckit_log%info(buffer); buffer = ''
+    
+    ! Read the fraction limit (optional, default 0.3 = 30%)
+    if (yaml_conf%has("melting water fraction")) then
+      call yaml_conf%get_or_die("melting water fraction", melting_water_fraction)
+    endif
+    
+    write(buffer,*) '  Melting water fraction limit: ', melting_water_fraction
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  ! Read dmmax configuration (optional, each species individually)
+  ! If not specified, uses default values
+  write(buffer,*) 'PPRO: dmmax configuration (mm):'
+  call fckit_log%info(buffer); buffer = ''
+  
+  if (yaml_conf%has("dmmax rain")) then
+    call yaml_conf%get_or_die("dmmax rain", dmmax_rain)
+  endif
+  write(buffer,*) '  rain: ', dmmax_rain
+  call fckit_log%info(buffer); buffer = ''
+  
+  if (yaml_conf%has("dmmax pure snow")) then
+    call yaml_conf%get_or_die("dmmax pure snow", dmmax_pure_snow)
+  endif
+  if (yaml_conf%has("dmmax melting snow")) then
+    call yaml_conf%get_or_die("dmmax melting snow", dmmax_melting_snow)
+  endif
+  write(buffer,*) '  pure snow: ', dmmax_pure_snow, ', melting snow: ', dmmax_melting_snow
+  call fckit_log%info(buffer); buffer = ''
+  
+  if (yaml_conf%has("dmmax pure graupel")) then
+    call yaml_conf%get_or_die("dmmax pure graupel", dmmax_pure_graupel)
+  endif
+  if (yaml_conf%has("dmmax melting graupel")) then
+    call yaml_conf%get_or_die("dmmax melting graupel", dmmax_melting_graupel)
+  endif
+  write(buffer,*) '  pure graupel: ', dmmax_pure_graupel, ', melting graupel: ', dmmax_melting_graupel
+  call fckit_log%info(buffer); buffer = ''
+  
+  if (yaml_conf%has("dmmax pure hail")) then
+    call yaml_conf%get_or_die("dmmax pure hail", dmmax_pure_hail)
+  endif
+  if (yaml_conf%has("dmmax melting hail")) then
+    call yaml_conf%get_or_die("dmmax melting hail", dmmax_melting_hail)
+  endif
+  write(buffer,*) '  pure hail: ', dmmax_pure_hail, ', melting hail: ', dmmax_melting_hail
+  call fckit_log%info(buffer); buffer = ''
 
   if ( .not. allocated(geovars_list) ) allocate(geovars_list(n_geovars))
   geovars_list(1) = var_airdens
@@ -311,9 +399,10 @@ logical :: found
   ! YAML option for vertical coordinate name
   call yaml_conf%get_or_die("VertCoord",coord_name)
   self%v_coord = coord_name
-  if( trim(self%v_coord) .ne. var_z ) then
+  if( trim(self%v_coord) .ne. var_z .and. trim(self%v_coord) .ne. var_zm .and. &
+      trim(self%v_coord) .ne. var_geomz ) then
       write(*,'(A)') 'ERROR: Unsupported vertical coordinate: ' // trim(self%v_coord)
-      write(*,'(A)') 'Supported coordinate: height (var_z)'
+      write(*,'(A)') 'Supported coordinates: geopotential_height, geometric_height, height_above_mean_sea_level'
       call abor1_ftn("ufo_PPRO: incorrect vertical coordinate specified")
   endif
 
@@ -493,10 +582,7 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
                                qh=qh, nr=nr, ns=ns, ng=ng, nh=nh, vg=vg, vh=vh, &
                                height=obsvcoord(iobs), zhobs = zhobs(iobs), zdrobs=zdrobs(iobs), &
                                kdpobs=kdpobs(iobs), coeff_melt=self%coeff_melt, &
-                               temperature = t - 273.15, iobs=iobs, &
-                               debug_output=self%debug_output, &
-                               use_size_zdr_qc=self%use_size_zdr_qc, &
-                               use_temperature_qc=self%use_temperature_qc)
+                               temperature = t - 273.15, iobs=iobs)
 
     else if ( trim(self%micro_option) .eq. "TCWA2" ) then
        call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &

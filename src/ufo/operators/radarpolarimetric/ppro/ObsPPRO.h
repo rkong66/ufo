@@ -89,6 +89,128 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
     0.3,                                             // default
     this
   };
+
+  oops::Parameter<std::string> melting_scheme{
+    "melting scheme",                                // YAML name
+    "Melting scheme option: 'liu24' (sqrt formula for all), 'zhang24' (original)", // description
+    "liu24",                                         // default: liu24
+    this
+  };
+
+  oops::Parameter<bool> enable_melting_transition{
+    "enable melting transition",                     // YAML name
+    "Enable smooth transition function for melting based on qx/qr ratio balance", // description
+    false,                                           // default: off
+    this
+  };
+
+  oops::Parameter<double> snow_ratio_low{
+    "snow ratio low",
+    "Lower bound of transition for snow (factor=0 below this)",
+    0.05,
+    this
+  };
+
+  oops::Parameter<double> snow_ratio_high{
+    "snow ratio high",
+    "Upper bound of transition for snow (factor=1 above this)",
+    0.2,
+    this
+  };
+
+  oops::Parameter<double> graupel_ratio_low{
+    "graupel ratio low",
+    "Lower bound of transition for graupel (factor=0 below this)",
+    0.05,
+    this
+  };
+
+  oops::Parameter<double> graupel_ratio_high{
+    "graupel ratio high",
+    "Upper bound of transition for graupel (factor=1 above this)",
+    0.2,
+    this
+  };
+
+  oops::Parameter<double> hail_ratio_low{
+    "hail ratio low",
+    "Lower bound of transition for hail (factor=0 below this)",
+    0.05,
+    this
+  };
+
+  oops::Parameter<double> hail_ratio_high{
+    "hail ratio high",
+    "Upper bound of transition for hail (factor=1 above this)",
+    0.2,
+    this
+  };
+
+  // Melting water content limit parameters
+  oops::Parameter<bool> enable_melting_water_limit{
+    "enable melting water limit",
+    "Enable limiting melting water content (qmsr/qmgr/qmhr) to a fraction of qr. When false (default), no limit",
+    false,
+    this
+  };
+
+  oops::Parameter<double> melting_water_fraction{
+    "melting water fraction",
+    "Fraction of qr to limit melting water content (only used when enable_melting_water_limit is true)",
+    0.3,
+    this
+  };
+
+  // dmmax configuration: maximum mean diameter limits for hydrometeor species [mm]
+  // Each species can be individually configured. If not specified, uses default.
+  oops::Parameter<double> dmmax_rain{
+    "dmmax rain",
+    "Max mean diameter for rain [mm]",
+    5.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_pure_snow{
+    "dmmax pure snow",
+    "Max mean diameter for pure snow [mm]",
+    10.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_melting_snow{
+    "dmmax melting snow",
+    "Max mean diameter for melting snow [mm]",
+    5.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_pure_graupel{
+    "dmmax pure graupel",
+    "Max mean diameter for pure graupel [mm]",
+    10.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_melting_graupel{
+    "dmmax melting graupel",
+    "Max mean diameter for melting graupel [mm]",
+    5.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_pure_hail{
+    "dmmax pure hail",
+    "Max mean diameter for pure hail [mm]",
+    10.0,
+    this
+  };
+
+  oops::Parameter<double> dmmax_melting_hail{
+    "dmmax melting hail",
+    "Max mean diameter for melting hail [mm]",
+    5.0,
+    this
+  };
  
   /*
    * The following list of hydrometeor species mixing ratios and number concentrations
