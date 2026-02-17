@@ -100,64 +100,60 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
   oops::Parameter<bool> enable_melting_transition{
     "enable melting transition",                     // YAML name
     "Enable smooth transition function for melting based on qx/qr ratio balance", // description
-    false,                                           // default: off
+    true,                                            // default: enabled
     this
   };
 
   oops::Parameter<double> snow_ratio_low{
     "snow ratio low",
     "Lower bound of transition for snow (factor=0 below this)",
-    0.05,
+    0.01,
     this
   };
 
   oops::Parameter<double> snow_ratio_high{
     "snow ratio high",
     "Upper bound of transition for snow (factor=1 above this)",
-    0.2,
+    0.05,
     this
   };
 
   oops::Parameter<double> graupel_ratio_low{
     "graupel ratio low",
     "Lower bound of transition for graupel (factor=0 below this)",
-    0.05,
+    0.01,
     this
   };
 
   oops::Parameter<double> graupel_ratio_high{
     "graupel ratio high",
     "Upper bound of transition for graupel (factor=1 above this)",
-    0.2,
+    0.05,
     this
   };
 
   oops::Parameter<double> hail_ratio_low{
     "hail ratio low",
     "Lower bound of transition for hail (factor=0 below this)",
-    0.05,
+    0.01,
     this
   };
 
   oops::Parameter<double> hail_ratio_high{
     "hail ratio high",
     "Upper bound of transition for hail (factor=1 above this)",
-    0.2,
+    0.05,
     this
   };
 
-  // Melting water content limit parameters
-  oops::Parameter<bool> enable_melting_water_limit{
-    "enable melting water limit",
-    "Enable limiting melting water content (qmsr/qmgr/qmhr) to a fraction of qr. When false (default), no limit",
-    false,
-    this
-  };
-
+  // Melting water content limit: qmxr <= melting_water_fraction * qr
+  // Default 1.0 = ensure qmxr <= qr (physical constraint); < 1.0 = tighter limit (e.g. 0.3 = max 30%)
   oops::Parameter<double> melting_water_fraction{
     "melting water fraction",
-    "Fraction of qr to limit melting water content (only used when enable_melting_water_limit is true)",
-    0.3,
+    "Max fraction of qr allowed for melting water content (qmsr/qmgr/qmhr). "
+    "1.0 (default) = qmxr <= qr (basic physical constraint); "
+    "0.3 = qmxr <= 0.3*qr (tighter limit, 30% max).",
+    1.0,
     this
   };
 
@@ -209,6 +205,108 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
     "dmmax melting hail",
     "Max mean diameter for melting hail [mm]",
     5.0,
+    this
+  };
+
+  oops::Parameter<bool> treat_hail_as_graupel{
+    "treat hail as graupel",
+    "When true, use graupel coefficients and formula for hail calculations (avoids C-band specific hail formula)",
+    false,
+    this
+  };
+
+  // Dm-based melting limit parameters
+  oops::Parameter<bool> enable_dm_melting_limit{
+    "enable dm melting limit",
+    "Enable temperature-dependent Dm-based melting inhibition. When enabled, large pure ice particles (Dm > threshold) are less likely to melt. Threshold depends on temperature: 1.0 mm at T < -5°C, 2.0 mm at T > 0°C, linear interpolation in between.",
+    true,  // Default: enabled
+    this
+  };
+
+  oops::Parameter<double> dm_melting_transition_width{
+    "dm melting transition width",
+    "Width of smooth transition region for Dm-based melting inhibition [mm]. Controls how smoothly the melting factor transitions from 1.0 to 0.0 around the Dm threshold.",
+    0.5,  // Default: 0.5 mm
+    this
+  };
+
+  // ====================================================================
+  // Dm tuning coefficients for each hydrometeor type.
+  // Multiplicative scaling factors applied to mean diameter (Dm) after computation:
+  //   Dm_new = factor * Dm_old,  Z_new = Z_old * factor^3  (since Z ∝ Dm^3)
+  // Default 1.0 (no scaling). Values <1 reduce Dm, >1 increase it.
+  // Each coefficient affects all downstream radar variables (ZH, ZDR, KDP)
+  // for the corresponding species.
+  // ====================================================================
+  oops::Parameter<double> tuning_dm_rain{
+    "tuning dm rain",
+    "Multiplicative scaling factor for rain mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_melting_snow{
+    "tuning dm melting snow",
+    "Multiplicative scaling factor for melting snow mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_melting_graupel{
+    "tuning dm melting graupel",
+    "Multiplicative scaling factor for melting graupel mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_melting_hail{
+    "tuning dm melting hail",
+    "Multiplicative scaling factor for melting hail mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_pure_snow{
+    "tuning dm pure snow",
+    "Multiplicative scaling factor for pure snow mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_pure_graupel{
+    "tuning dm pure graupel",
+    "Multiplicative scaling factor for pure graupel mean diameter (Dm).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_dm_pure_hail{
+    "tuning dm pure hail",
+    "Multiplicative scaling factor for pure hail mean diameter (Dm).",
+    1.0, this
+  };
+
+  // ====================================================================
+  // Melting fraction tuning coefficients.
+  // Multiplicative scaling factors applied to the melting fraction
+  // (ratio = qr/(qr+qx)) after it is computed by the melting scheme:
+  //   ratio_new = min(factor * ratio_old, 1.0)
+  // Default 1.0 (no scaling). <1 makes particles more ice-like,
+  // >1 makes them more rain-like. Clamped to [0, 1].
+  // Affects: melting density, scattering coefficients, mass partitioning.
+  // ====================================================================
+  oops::Parameter<double> tuning_melt_frac_snow{
+    "tuning melt frac snow",
+    "Multiplicative scaling factor for melting snow liquid fraction (rats = qr/(qr+qs)).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_melt_frac_graupel{
+    "tuning melt frac graupel",
+    "Multiplicative scaling factor for melting graupel liquid fraction (ratg = qr/(qr+qg)).",
+    1.0, this
+  };
+  oops::Parameter<double> tuning_melt_frac_hail{
+    "tuning melt frac hail",
+    "Multiplicative scaling factor for melting hail liquid fraction (rath = qr/(qr+qh)).",
+    1.0, this
+  };
+
+  // Skip small qx: when enabled, skips all radar variable calculations for species
+  // with negligible mixing ratios, setting ZH/KDP/dm/w/z=0, ZDR=1, PhV=1.
+  oops::Parameter<bool> skip_small_qx{
+    "skip small qx",
+    "Skip radar variable calculations for hydrometeor species with very small mixing ratios "
+    "(qpr < 1e-3, qms < 0.001, qmg < 0.01, qmh < 0.01, qps < 1e-4, qpg < 0.001, qph < 0.001 g/kg). "
+    "Sets ZH/KDP/dm=0, ZDR=1.0 (0 dB), PhV=1.0 for skipped species.",
+    true,  // Default: enabled
     this
   };
  
@@ -281,6 +379,46 @@ class ObsPPROParameters : public ObsOperatorParametersBase  {
      "Name of model hail volume mixing ratio variable",
      "volume_mixing_ratio_of_hail_in_air",  // this should be consistent with var_qvh
      this};
+
+  // TCWA2 operator specific variables (NOT needed for Zhang21)
+  // These are only used when polarimetric_operator = TCWA2
+  oops::Parameter<std::string> var_cloud_mixing_ratio
+    {"var_cloud_mixing_ratio",
+     "Name of model cloud water mixing ratio variable (TCWA2 operator only, not needed for Zhang21)",
+     "cloud_water",  // this should be consistent with var_qc
+     this};
+
+  oops::Parameter<std::string> var_ice_mixing_ratio
+    {"var_ice_mixing_ratio",
+     "Name of model ice mixing ratio variable (TCWA2 operator only, not needed for Zhang21)",
+     "ice_water",  // this should be consistent with var_qi
+     this};
+
+  oops::Parameter<std::string> var_ice_number_concentration
+    {"var_ice_number_concentration",
+     "Name of model ice number concentration variable (TCWA2 operator only, not needed for Zhang21)",
+     "ice_number_concentration",  // this should be consistent with var_ni
+     this};
+
+  oops::Parameter<std::string> var_snow_melted_fraction
+    {"var_snow_melted_fraction",
+     "Name of model snow melted fraction variable (TCWA2 operator only, not needed for Zhang21)",
+     "snow_melted_fraction",  // this should be consistent with var_smlf
+     this};
+
+  oops::Parameter<std::string> var_graupel_melted_fraction
+    {"var_graupel_melted_fraction",
+     "Name of model graupel melted fraction variable (TCWA2 operator only, not needed for Zhang21)",
+     "graupel_melted_fraction",  // this should be consistent with var_gmlf
+     this};
+
+  // Dm regularization for small ntx/qx
+  oops::Parameter<bool> enable_dm_regularization{
+    "enable dm regularization",
+    "Enable Dm regularization for small ntx/qx in dm_z_2moment. When enabled, sets dm = 0 if both qx < 1e-3 g/kg AND ntx < 1000 /m^3 (negligible particle population). Otherwise uses standard formula (caller ensures ntx >= 10 for zero protection, dmmax caps upper bound). Default: true (enabled).",
+    true,   // Default: enabled
+    this
+  };
   
 };
 

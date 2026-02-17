@@ -699,18 +699,7 @@ subroutine ufo_PPRO_sim1obs_tl(iband, &
   endif
 
   stop  !Rong Kong temprarily added here
-  ! melting scheme
-  if (present(qh_tl) .and. present(ntr_tl) .and. present(nts_tl) .and. present(ntg_tl) .and. present(nth_tl)) then
-     call melting_scheme_zhang24_tl( &
-          qr_tl, qs_tl, qg_tl, qms_tl, qmg_tl, qpr_tl, qps_tl, qpg_tl, rats_tl, ratg_tl, &
-          ntr_tl=ntr_tl, nts_tl=nts_tl, ntg_tl=ntg_tl, &
-          ntms_tl=ntms_tl, ntmg_tl=ntmg_tl, ntpr_tl=ntpr_tl, ntps_tl=ntps_tl, ntpg_tl=ntps_tl, &
-          qh_tl=qh_tl, nth_tl=nth_tl, rath_tl=rath_tl, &
-          qmh_tl=qmh_tl, qph_tl=qph_tl, ntmh_tl=ntmh_tl, ntph_tl=ntph_tl )
-  else !! WSM6 and Thompson are the same
-     call melting_scheme_zhang24_tl( &
-          qr_tl, qs_tl, qg_tl, qms_tl, qmg_tl, qpr_tl, qps_tl, qpg_tl, rats_tl, ratg_tl )
-  endif
+  ! TODO: melting scheme TL not yet implemented for liu24
 
   ! 1. pure rain
   call set_traj_precip_type('rain')
@@ -1016,16 +1005,7 @@ subroutine ufo_PPRO_sim1obs_ad(iband, &
      call watercontent_ad(qph_ad, wph_ad)
   endif
 
-  ! melting scheme
-  if (present(qh_ad) .and. present(ntr_ad) .and. present(nts_ad) .and. present(ntg_ad) .and. present(nth_ad)) then
-     call melting_scheme_zhang24_ad(qr_ad, qs_ad, qg_ad, qms_ad, qmg_ad, qpr_ad, qps_ad, qpg_ad, rats_ad, ratg_ad, &
-          ntr_ad=ntr_ad, nts_ad=nts_ad, ntg_ad=ntg_ad, &
-          ntms_ad=ntms_ad, ntmg_ad=ntmg_ad, ntpr_ad=ntpr_ad, ntps_ad=ntps_ad, ntpg_ad=ntps_ad, &
-          qh_ad=qh_ad, nth_ad=nth_ad, rath_ad=rath_ad, &
-          qmh_ad=qmh_ad, qph_ad=qph_ad, ntmh_ad=ntmh_ad, ntph_ad=ntph_ad )
-  else !! WSM6 and Thompson are the same
-     call melting_scheme_zhang24_ad(qr_ad, qs_ad, qg_ad, qms_ad, qmg_ad, qpr_ad, qps_ad, qpg_ad, rats_ad, ratg_ad)            
-  endif
+  ! TODO: melting scheme AD not yet implemented for liu24
 
 end subroutine ufo_PPRO_sim1obs_ad
 

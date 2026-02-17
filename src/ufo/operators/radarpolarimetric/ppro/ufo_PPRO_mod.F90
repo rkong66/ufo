@@ -32,10 +32,20 @@ module ufo_PPRO_mod
                          snow_ratio_low, snow_ratio_high, &
                          graupel_ratio_low, graupel_ratio_high, &
                          hail_ratio_low, hail_ratio_high, &
-                         enable_melting_water_limit, melting_water_fraction, &
+                         melting_water_fraction, &
                          dmmax_rain, dmmax_pure_snow, dmmax_melting_snow, &
                          dmmax_pure_graupel, dmmax_melting_graupel, &
-                         dmmax_pure_hail, dmmax_melting_hail
+                         dmmax_pure_hail, dmmax_melting_hail, &
+                         treat_hail_as_graupel, &
+                         enable_dm_melting_limit, dm_melting_transition_width, &
+                         tuning_dm_rain, tuning_dm_melting_snow, &
+                         tuning_dm_melting_graupel, tuning_dm_melting_hail, &
+                         tuning_dm_pure_snow, tuning_dm_pure_graupel, &
+                         tuning_dm_pure_hail, &
+                         tuning_melt_frac_snow, tuning_melt_frac_graupel, &
+                         tuning_melt_frac_hail, &
+                         skip_small_qx, &
+                         enable_dm_regularization
  use missing_values_mod
  use fckit_log_module, only: fckit_log
 
@@ -57,8 +67,9 @@ module ufo_PPRO_mod
                                        ! -1 means not used
   character(len=MAXVARLEN), public :: v_coord ! GeoVaL to use to interpolate in vertical
   character(len=MAXVARLEN), public :: micro_option    ! Choice (enum) of microphysics option
+  character(len=16), public :: polarimetric_operator  ! Polarimetric operator: 'Zhang21' or 'TCWA2'
   real(kind_real), public :: coeff_melt
-  character(len=16), public :: melting_scheme  ! Melting scheme option: 'liu24', 'liu25', or 'zhang24'
+  character(len=16), public :: melting_scheme  ! Melting scheme option: 'liu24' or 'liu25'
  contains
   procedure :: setup  => ufo_PPRO_setup
   procedure :: simobs => ufo_PPRO_simobs
@@ -121,25 +132,70 @@ logical :: found
   ! YAML option for polarimetric operator (default: Zhang21)
   if( yaml_conf%has("polarimetric operator") ) then
      call yaml_conf%get_or_die("polarimetric operator", ppro_operator)
+     self%polarimetric_operator = trim(ppro_operator)
      call ppro_set_operator(trim(ppro_operator))
   else
-     call ppro_set_operator('Zhang21')  ! Default operator
+     self%polarimetric_operator = 'Zhang21'  ! Default operator
+     call ppro_set_operator('Zhang21')
   endif
   
   ! YAML option for microphysics scheme
+  ! ============================================================================
+  ! Currently available in MPAS:
+  !   - WSM6      : 1-moment (qr, qs, qg)                              n_geovars=7
+  !   - Thompson  : Partial 2-moment (qr, qs, qg + nr)                 n_geovars=8
+  !   - TCWA2     : Full 2-moment without hail + extras                n_geovars=15
+  !   - NSSL      : Full 2-moment with hail + vg,vh                    n_geovars=14
+  !
+  ! Placeholder for future MPAS availability:
+  !   - Lin, WSM5, WSM3, Kessler : 1-moment (same as WSM6)             n_geovars=7
+  !   - Morrison                 : Full 2-moment without hail          n_geovars=12
+  !   - Milbrandt-Yau, MY2       : Full 2-moment with hail             n_geovars=12
+  ! ============================================================================
   call yaml_conf%get_or_die("microphysics option", micro_option)
   if (trim(micro_option) .eq. "Thompson") then
     self%micro_option = 'THOMPSON'
     n_geovars=8
-  else if (trim(micro_option) .eq. "WSM6") then
+  else if (trim(micro_option) .eq. "WSM6" .or. &
+           trim(micro_option) .eq. "Lin" .or. &
+           trim(micro_option) .eq. "WSM5" .or. &
+           trim(micro_option) .eq. "WSM3" .or. &
+           trim(micro_option) .eq. "Kessler") then
+    ! 1-moment schemes: qr, qs, qg (no number concentrations)
     self%micro_option = 'WSM6'
     n_geovars=7
   else if (trim(micro_option) .eq. "NSSL") then
+    ! NSSL: Full 2-moment with hail + vg, vh
+    ! Variables: qr,qs,qg,temp,pres,rho,z (7) + qh,nr,ns,ng,nh,vg,vh (7) = 14
     self%micro_option = 'NSSL'
     n_geovars=14
+  else if (trim(micro_option) .eq. "Milbrandt-Yau" .or. &
+           trim(micro_option) .eq. "MY2") then
+    ! Milbrandt-Yau: Full 2-moment with hail (no vg, vh)
+    ! Variables: qr,qs,qg,temp,pres,rho,z (7) + qh,nr,ns,ng,nh (5) = 12
+    self%micro_option = 'MY2'
+    n_geovars=12
   else if (trim(micro_option) .eq. "TCWA2") then
+    ! TCWA2: Full 2-moment without hail
+    ! If using Zhang21 operator: only needs qr,qs,qg,nr,ns,ng (qc,qi,ni,smlf,gmlf NOT needed)
+    !   Zhang21 computes melting internally and does not use qc/qi/ni
+    ! If using TCWA2 operator: needs qc,qi,ni,smlf,gmlf from MPAS
+    ! Variables: qr,qs,qg,temp,pres,rho,z (7) + nr,ns,ng (3) = 10 (Zhang21)
+    !            qr,qs,qg,temp,pres,rho,z (7) + nr,ns,ng,qc,qi,ni,smlf,gmlf (8) = 15 (TCWA2)
     self%micro_option = 'TCWA2'
-    n_geovars=15
+    if (trim(self%polarimetric_operator) .eq. 'Zhang21' .or. &
+        trim(self%polarimetric_operator) .eq. 'zhang21' .or. &
+        trim(self%polarimetric_operator) .eq. 'ZHANG21') then
+      n_geovars=10  ! Zhang21: only needs qr,qs,qg,nr,ns,ng (no qc/qi/ni/smlf/gmlf)
+    else
+      n_geovars=15  ! TCWA2 operator needs qc,qi,ni,smlf,gmlf from MPAS
+    endif
+  else if (trim(micro_option) .eq. "Morrison" .or. &
+           trim(micro_option) .eq. "Morrison2") then
+    ! Morrison: Full 2-moment without hail (with ice)
+    ! Variables: qr,qs,qg,temp,pres,rho,z (7) + nr,ns,ng,qi,ni (5) = 12
+    self%micro_option = 'MORRISON'
+    n_geovars=12
   else
     print*, ' microphysics picked is: ', trim(micro_option)
     call abor1_ftn("microphysics option not set or unsupported, aborting")
@@ -168,7 +224,7 @@ logical :: found
   if (yaml_conf%has("enable melting transition")) then
     call yaml_conf%get_or_die("enable melting transition", enable_melting_transition)
   else
-    enable_melting_transition = .false.  ! Default: off
+    enable_melting_transition = .true.  ! Default: enabled (consistent with ppro core module)
   endif
   
   if (enable_melting_transition) then
@@ -203,25 +259,125 @@ logical :: found
     call fckit_log%info(buffer); buffer = ''
   endif
 
-  ! Read melting water content limit parameters (optional)
-  ! When enabled, limits qmsr/qmgr/qmhr to a fraction of qr
-  ! When disabled (default), no limit
-  if (yaml_conf%has("enable melting water limit")) then
-    call yaml_conf%get_or_die("enable melting water limit", enable_melting_water_limit)
+  ! Read Dm-based melting limit parameters (optional, default enabled)
+  ! When enabled, prevents melting of large pure ice particles based on
+  ! temperature-dependent Dm threshold
+  if (yaml_conf%has("enable dm melting limit")) then
+    call yaml_conf%get_or_die("enable dm melting limit", enable_dm_melting_limit)
   else
-    enable_melting_water_limit = .false.  ! Default: off
+    enable_dm_melting_limit = .true.  ! Default: enabled
   endif
   
-  if (enable_melting_water_limit) then
-    write(buffer,*) 'PPRO: Melting water content limit enabled'
+  if (enable_dm_melting_limit) then
+    write(buffer,*) 'PPRO: Dm-based melting limit enabled (temperature-dependent)'
     call fckit_log%info(buffer); buffer = ''
     
-    ! Read the fraction limit (optional, default 0.3 = 30%)
-    if (yaml_conf%has("melting water fraction")) then
-      call yaml_conf%get_or_die("melting water fraction", melting_water_fraction)
+    ! Read transition width (optional, default 0.5 mm)
+    if (yaml_conf%has("dm melting transition width")) then
+      call yaml_conf%get_or_die("dm melting transition width", dm_melting_transition_width)
     endif
     
-    write(buffer,*) '  Melting water fraction limit: ', melting_water_fraction
+    write(buffer,*) '  Dm transition width: ', dm_melting_transition_width, ' mm'
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  ! Read Dm tuning coefficients for all hydrometeor types (optional, default 1.0)
+  if (yaml_conf%has("tuning dm rain")) then
+    call yaml_conf%get_or_die("tuning dm rain", tuning_dm_rain)
+  endif
+  if (yaml_conf%has("tuning dm melting snow")) then
+    call yaml_conf%get_or_die("tuning dm melting snow", tuning_dm_melting_snow)
+  endif
+  if (yaml_conf%has("tuning dm melting graupel")) then
+    call yaml_conf%get_or_die("tuning dm melting graupel", tuning_dm_melting_graupel)
+  endif
+  if (yaml_conf%has("tuning dm melting hail")) then
+    call yaml_conf%get_or_die("tuning dm melting hail", tuning_dm_melting_hail)
+  endif
+  if (yaml_conf%has("tuning dm pure snow")) then
+    call yaml_conf%get_or_die("tuning dm pure snow", tuning_dm_pure_snow)
+  endif
+  if (yaml_conf%has("tuning dm pure graupel")) then
+    call yaml_conf%get_or_die("tuning dm pure graupel", tuning_dm_pure_graupel)
+  endif
+  if (yaml_conf%has("tuning dm pure hail")) then
+    call yaml_conf%get_or_die("tuning dm pure hail", tuning_dm_pure_hail)
+  endif
+  ! Log any non-default tuning coefficients
+  if (tuning_dm_rain /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm rain = ', tuning_dm_rain
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_melting_snow /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm melting snow = ', tuning_dm_melting_snow
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_melting_graupel /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm melting graupel = ', tuning_dm_melting_graupel
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_melting_hail /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm melting hail = ', tuning_dm_melting_hail
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_pure_snow /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm pure snow = ', tuning_dm_pure_snow
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_pure_graupel /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm pure graupel = ', tuning_dm_pure_graupel
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_dm_pure_hail /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning dm pure hail = ', tuning_dm_pure_hail
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  ! Read melting fraction tuning coefficients (optional, default 1.0)
+  if (yaml_conf%has("tuning melt frac snow")) then
+    call yaml_conf%get_or_die("tuning melt frac snow", tuning_melt_frac_snow)
+  endif
+  if (yaml_conf%has("tuning melt frac graupel")) then
+    call yaml_conf%get_or_die("tuning melt frac graupel", tuning_melt_frac_graupel)
+  endif
+  if (yaml_conf%has("tuning melt frac hail")) then
+    call yaml_conf%get_or_die("tuning melt frac hail", tuning_melt_frac_hail)
+  endif
+  if (tuning_melt_frac_snow /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning melt frac snow = ', tuning_melt_frac_snow
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_melt_frac_graupel /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning melt frac graupel = ', tuning_melt_frac_graupel
+    call fckit_log%info(buffer); buffer = ''
+  endif
+  if (tuning_melt_frac_hail /= 1.0d0) then
+    write(buffer,*) 'PPRO: tuning melt frac hail = ', tuning_melt_frac_hail
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  ! Read skip small qx parameter (optional, default enabled)
+  ! When enabled, skips radar variable calculations when mixing ratios are below
+  ! thresholds to avoid numerical issues. When disabled, calculates radar variables
+  ! for all non-zero mixing ratios.
+  if (yaml_conf%has("skip small qx")) then
+    call yaml_conf%get_or_die("skip small qx", skip_small_qx)
+  else
+    skip_small_qx = .true.  ! Default: enabled
+  endif
+  
+  if (skip_small_qx) then
+    write(buffer,*) 'PPRO: Skip small qx enabled (skip all radar variables when qx below thresholds)'
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  ! Read melting water fraction (optional, default 1.0)
+  ! qmxr <= melting_water_fraction * qr; 1.0 = qmxr <= qr; < 1.0 = tighter limit
+  if (yaml_conf%has("melting water fraction")) then
+    call yaml_conf%get_or_die("melting water fraction", melting_water_fraction)
+  endif
+  if (melting_water_fraction < 1.0d0) then
+    write(buffer,*) 'PPRO: melting water fraction = ', melting_water_fraction
     call fckit_log%info(buffer); buffer = ''
   endif
 
@@ -263,7 +419,41 @@ logical :: found
   write(buffer,*) '  pure hail: ', dmmax_pure_hail, ', melting hail: ', dmmax_melting_hail
   call fckit_log%info(buffer); buffer = ''
 
-  if ( .not. allocated(geovars_list) ) allocate(geovars_list(n_geovars))
+  ! Read "treat hail as graupel" option (optional, default false)
+  ! When enabled, uses graupel coefficients and formula for hail calculations
+  if (yaml_conf%has("treat hail as graupel")) then
+    call yaml_conf%get_or_die("treat hail as graupel", treat_hail_as_graupel)
+  else
+    treat_hail_as_graupel = .false.  ! Default: off (use normal hail treatment)
+  endif
+  
+  write(buffer,*) 'PPRO: Treat hail as graupel: ', treat_hail_as_graupel
+  call fckit_log%info(buffer); buffer = ''
+
+  ! Read Dm regularization parameter (optional, default enabled)
+  ! When enabled, applies regularization for small ntx/qx in dm_z_2moment
+  ! to prevent extreme Dm values
+  if (yaml_conf%has("enable dm regularization")) then
+    call yaml_conf%get_or_die("enable dm regularization", enable_dm_regularization)
+  else
+    enable_dm_regularization = .true.   ! Default: enabled
+  endif
+  
+  if (enable_dm_regularization) then
+    write(buffer,*) 'PPRO: Dm regularization enabled (smooth transition for small ntx/qx)'
+    call fckit_log%info(buffer); buffer = ''
+  else
+    write(buffer,*) 'PPRO: Dm regularization disabled (= original codeall behavior)'
+    call fckit_log%info(buffer); buffer = ''
+  endif
+
+  if ( .not. allocated(geovars_list) ) then
+    allocate(geovars_list(n_geovars))
+    ! Initialize all elements to empty string to avoid uninitialized strings
+    do i = 1, n_geovars
+      geovars_list(i) = ''
+    end do
+  endif
   geovars_list(1) = var_airdens
   geovars_list(2) = var_ts
   geovars_list(3) = var_prs
@@ -393,6 +583,76 @@ logical :: found
      if( yaml_conf%has(trim(var_string)) ) then
         call yaml_conf%get_or_die(trim(var_string), this_varname)
         geovars_list(15) = this_varname
+     endif
+  endif
+
+  !! Milbrandt-Yau (MY2) scheme - placeholder for future MPAS availability
+  !! Variables: qr,qs,qg (5-7) + qh,nr,ns,ng,nh (8-12) = 12 total
+  if ( trim(self%micro_option) .eq. "MY2" ) then
+     ! hail mixing ratio, kg/kg
+     var_string="var_hail_mixing_ratio"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(8) = this_varname
+     endif
+     ! number concentration of rain water, #/kg
+     var_string="var_rain_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(9) = this_varname
+     endif
+     ! number concentration of snow, #/kg
+     var_string="var_snow_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(10) = this_varname
+     endif
+     ! number concentration of graupel, #/kg
+     var_string="var_graupel_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(11) = this_varname
+     endif
+     ! number concentration of hail, #/kg
+     var_string="var_hail_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(12) = this_varname
+     endif
+  endif
+
+  !! Morrison scheme - placeholder for future MPAS availability
+  !! Variables: qr,qs,qg (5-7) + nr,ns,ng,qi,ni (8-12) = 12 total
+  if ( trim(self%micro_option) .eq. "MORRISON" ) then
+     ! number concentration of rain water, #/kg
+     var_string="var_rain_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(8) = this_varname
+     endif
+     ! number concentration of snow, #/kg
+     var_string="var_snow_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(9) = this_varname
+     endif
+     ! number concentration of graupel, #/kg
+     var_string="var_graupel_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(10) = this_varname
+     endif
+     ! ice mixing ratio, kg/kg
+     var_string="var_ice_mixing_ratio"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(11) = this_varname
+     endif
+     ! ice number concentration, #/kg
+     var_string="var_ice_number_concentration"
+     if( yaml_conf%has(trim(var_string)) ) then
+        call yaml_conf%get_or_die(trim(var_string), this_varname)
+        geovars_list(12) = this_varname
      endif
   endif
 
@@ -554,11 +814,36 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
        nr = fields(8,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
        ns = fields(9,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
        ng = fields(10,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
-       qc = 1000.0*fields(11,iobs) ! kg/kg -> g/kg
-       qi = 1000.0*fields(12,iobs) ! kg/kg -> g/kg
-       ni = fields(13,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
-       smlf = fields(14,iobs)      ! melted fraction of snow
-       gmlf = fields(15,iobs)      ! melted fraction of graupel
+       ! If using Zhang21 operator with TCWA2 microphysics, qc/qi/ni/smlf/gmlf are not needed
+       ! Only check these if n_geovars > 10 (i.e., using full TCWA2 operator)
+       if (nvars_geovars >= 15) then
+         qc = 1000.0*fields(11,iobs) ! kg/kg -> g/kg
+         qi = 1000.0*fields(12,iobs) ! kg/kg -> g/kg
+         ni = fields(13,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+         smlf = fields(14,iobs)      ! melted fraction of snow
+         gmlf = fields(15,iobs)      ! melted fraction of graupel
+       else
+         ! Zhang21 operator: these are not needed and won't be passed
+         qc = 0.0_kind_real
+         qi = 0.0_kind_real
+         ni = 0.0_kind_real
+         smlf = 0.0_kind_real
+         gmlf = 0.0_kind_real
+       endif
+    else if ( trim(self%micro_option) .eq. "MY2" ) then
+       ! Milbrandt-Yau: Full 2-moment with hail (placeholder)
+       qh = 1000.0*fields(8,iobs)  ! kg/kg -> g/kg
+       nr = fields(9,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
+       ns = fields(10,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+       ng = fields(11,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+       nh = fields(12,iobs)*rho    ! #/kg x kg/m^3 = #/m^3
+    else if ( trim(self%micro_option) .eq. "MORRISON" ) then
+       ! Morrison: Full 2-moment without hail (placeholder)
+       nr = fields(8,iobs)*rho      ! #/kg x kg/m^3 = #/m^3
+       ns = fields(9,iobs)*rho      ! #/kg x kg/m^3 = #/m^3
+       ng = fields(10,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
+       qi = 1000.0*fields(11,iobs)  ! kg/kg -> g/kg
+       ni = fields(12,iobs)*rho     ! #/kg x kg/m^3 = #/m^3
     endif
 
     if (rho .LT. 0.0) then
@@ -585,9 +870,35 @@ subroutine ufo_PPRO_simobs(self, geovals, obss, nvars, nlocs, hofx)
                                temperature = t - 273.15, iobs=iobs)
 
     else if ( trim(self%micro_option) .eq. "TCWA2" ) then
-       call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &
+       ! If using Zhang21 operator, only pass nr, ns, ng (no qi/ni/qc/smlf/gmlf)
+       if (trim(self%polarimetric_operator) .eq. 'Zhang21' .or. &
+           trim(self%polarimetric_operator) .eq. 'zhang21' .or. &
+           trim(self%polarimetric_operator) .eq. 'ZHANG21') then
+         call ppro_compute_point(iband(iobs), 'TCWA2', rho, t, &
+                                 qr, qs, qg, zh, zdr, kdp, phv, &
+                                 nr=nr, ns=ns, ng=ng)
+       else
+         call ppro_compute_point(iband(iobs), self%micro_option, rho, t, &
+                                 qr, qs, qg, zh, zdr, kdp, phv, &
+                                 nr=nr, ns=ns, ng=ng, qi=qi, ni=ni, qc=qc, smlf=smlf, gmlf=gmlf)
+       endif
+
+    else if ( trim(self%micro_option) .eq. "MY2" ) then
+       ! Milbrandt-Yau: Full 2-moment with hail (placeholder)
+       call ppro_compute_point(iband(iobs), 'NSSL', rho, t, &
                                qr, qs, qg, zh, zdr, kdp, phv, &
-                               nr=nr, ns=ns, ng=ng, qi=qi, ni=ni, qc=qc, smlf=smlf, gmlf=gmlf)
+                               qh=qh, nr=nr, ns=ns, ng=ng, nh=nh, &
+                               height=obsvcoord(iobs), zhobs=zhobs(iobs), zdrobs=zdrobs(iobs), &
+                               kdpobs=kdpobs(iobs), coeff_melt=self%coeff_melt, &
+                               temperature=t-273.15, iobs=iobs)
+
+    else if ( trim(self%micro_option) .eq. "MORRISON" ) then
+       ! Morrison: Full 2-moment without hail (placeholder)
+       ! Note: qi, ni are read but not passed to ppro_compute_point
+       !       (ice has minimal contribution to radar polarimetric variables)
+       call ppro_compute_point(iband(iobs), 'TCWA2', rho, t, &
+                               qr, qs, qg, zh, zdr, kdp, phv, &
+                               nr=nr, ns=ns, ng=ng)
     end if
 
     if (zh < 1.0_kind_real)then
